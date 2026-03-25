@@ -8,6 +8,9 @@ CLI_DIR="/usr/local/lib/vscode-cli"
 CLI_BIN="/usr/local/bin/code"
 SERVICE_NAME="code-tunnel.service"
 TARGET_USER="${1:-${SUDO_USER:-}}"
+TARGET_HOME=""
+VSCODE_SETTINGS_DIR=""
+VSCODE_SETTINGS_FILE=""
 
 # Chargement optionnel du fichier .env
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -39,6 +42,15 @@ if ! id -u "$TARGET_USER" >/dev/null 2>&1; then
     echo "[ERREUR] Utilisateur introuvable: $TARGET_USER"
     exit 1
 fi
+
+TARGET_HOME="$(getent passwd "$TARGET_USER" | cut -d: -f6)"
+if [[ -z "${TARGET_HOME}" || ! -d "${TARGET_HOME}" ]]; then
+    echo "[ERREUR] Repertoire home introuvable pour: $TARGET_USER"
+    exit 1
+fi
+
+VSCODE_SETTINGS_DIR="${TARGET_HOME}/.vscode-server/data/Machine"
+VSCODE_SETTINGS_FILE="${VSCODE_SETTINGS_DIR}/settings.json"
 
 # Vérification des droits root
 if [ "$EUID" -ne 0 ]; then
@@ -76,6 +88,31 @@ ln -sf "$CLI_DIR/code" "$CLI_BIN"
 # Définition des permissions appropriées
 chown -R "$TARGET_USER:$TARGET_USER" "$CLI_DIR"
 chmod +x "$CLI_DIR/code"
+
+# Configuration VS Code Server: neutralise un proxy herite localement
+echo "[INFO] Configuration des settings VS Code Server (proxy desactive)..."
+mkdir -p "$VSCODE_SETTINGS_DIR"
+
+if command -v jq >/dev/null 2>&1; then
+    TMP_SETTINGS_FILE="$(mktemp)"
+
+    if [[ -s "$VSCODE_SETTINGS_FILE" ]] && jq -e . "$VSCODE_SETTINGS_FILE" >/dev/null 2>&1; then
+        jq '. + {"http.proxy": "", "http.proxyStrictSSL": false}' "$VSCODE_SETTINGS_FILE" > "$TMP_SETTINGS_FILE"
+    else
+        jq -n '{"http.proxy": "", "http.proxyStrictSSL": false}' > "$TMP_SETTINGS_FILE"
+    fi
+
+    mv "$TMP_SETTINGS_FILE" "$VSCODE_SETTINGS_FILE"
+else
+    cat > "$VSCODE_SETTINGS_FILE" <<EOF
+{
+  "http.proxy": "",
+  "http.proxyStrictSSL": false
+}
+EOF
+fi
+
+chown -R "$TARGET_USER:$TARGET_USER" "${TARGET_HOME}/.vscode-server"
 
 # Création du service systemd pour code tunnel
 echo "[INFO] Création du service systemd $SERVICE_NAME..."
@@ -174,3 +211,4 @@ if [[ "${SYSTEMD_AVAILABLE}" == "true" ]]; then
 fi
 echo ""
 echo "Statut du service : sudo systemctl status $SERVICE_NAME"
+echo "Settings VS Code Server : $VSCODE_SETTINGS_FILE"
