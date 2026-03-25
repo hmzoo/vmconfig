@@ -1,0 +1,23 @@
+# Fichier de configuration local avec secrets
+.env
+.env.local
+
+# Artefacts temporaires
+/tmp/
+*.tar.gz
+*.tar
+*.zip
+
+# Logs
+*.log
+
+# Caches
+__pycache__/
+.cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~

@@ -79,31 +79,43 @@ WantedBy=multi-user.target
 EOF
 
 # Permissions et activation du service
-systemctl daemon-reload
-systemctl enable "$SERVICE_NAME"
-systemctl start "$SERVICE_NAME"
+if systemctl status >/dev/null 2>&1; then
+    echo "[INFO] Configuration et demarrage du service systemd..."
+    systemctl daemon-reload
+    systemctl enable "$SERVICE_NAME"
+    systemctl start "$SERVICE_NAME"
+    SYSTEMD_AVAILABLE="true"
+else
+    echo "[WARN] systemd n'est pas disponible (conteneur/environnement sans init)."
+    SYSTEMD_AVAILABLE="false"
+fi
 
 echo "[INFO] Recuperation des informations de connexion tunnel..."
 AUTH_LINE=""
 
-for _ in {1..10}; do
-    RECENT_LOGS="$(journalctl -u "$SERVICE_NAME" -n 80 --no-pager 2>/dev/null || true)"
-    AUTH_LINE="$(printf '%s\n' "$RECENT_LOGS" | grep -E 'https://github.com/login/device|use code [A-Z0-9-]+' | tail -n 1 || true)"
+if [[ "${SYSTEMD_AVAILABLE}" == "true" ]]; then
+    for _ in {1..10}; do
+        RECENT_LOGS="$(journalctl -u "$SERVICE_NAME" -n 80 --no-pager 2>/dev/null || true)"
+        AUTH_LINE="$(printf '%s\n' "$RECENT_LOGS" | grep -E 'https://github.com/login/device|use code [A-Z0-9-]+' | tail -n 1 || true)"
 
-    if [[ -n "$AUTH_LINE" ]]; then
-        break
-    fi
+        if [[ -n "$AUTH_LINE" ]]; then
+            break
+        fi
 
-    sleep 2
-done
+        sleep 2
+    done
+fi
 
 # Nettoyage
 rm -f "$CLI_ARCHIVE"
 
-echo "[INFO] Installation terminee. Le tunnel VS Code est lance automatiquement au demarrage."
-
-echo "[INFO] Dernieres lignes du service:"
-journalctl -u "$SERVICE_NAME" -n 20 --no-pager || true
+if [[ "${SYSTEMD_AVAILABLE}" == "true" ]]; then
+    echo "[INFO] Installation terminee. Le tunnel VS Code est lance automatiquement au demarrage."
+    echo "[INFO] Dernieres lignes du service:"
+    journalctl -u "$SERVICE_NAME" -n 20 --no-pager || true
+else
+    echo "[INFO] Installation terminee. Binaire VS Code CLI installe: $CLI_BIN"
+fi
 
 if [[ -n "$AUTH_LINE" ]]; then
     DEVICE_CODE="$(printf '%s\n' "$AUTH_LINE" | sed -n 's/.*use code \([A-Z0-9-]\+\).*/\1/p')"
@@ -115,12 +127,21 @@ if [[ -n "$AUTH_LINE" ]]; then
     fi
 else
     echo ""
-    echo "[INFO] Le code de connexion GitHub n'a pas ete detecte automatiquement."
-    echo "[INFO] Lancez: sudo journalctl -u $SERVICE_NAME -f"
+    if [[ "${SYSTEMD_AVAILABLE}" == "true" ]]; then
+        echo "[INFO] Le code de connexion GitHub n'a pas ete detecte automatiquement."
+        echo "[INFO] Lancez: sudo journalctl -u $SERVICE_NAME -f"
+    else
+        echo "[INFO] Service systemd non disponible - configuration manuelle requise."
+        echo "[INFO] Pour demarrer le tunnel VS Code, lancez:"
+        echo "[INFO]   su - $TARGET_USER"
+        echo "[INFO]   $CLI_BIN tunnel --accept-server-license-terms --name \$(hostname)"
+    fi
 fi
 
-echo "Important : La première authentification GitHub doit être réalisée manuellement."
-echo "Ouvrez les logs du service avec : sudo journalctl -u $SERVICE_NAME -f"
-echo "Puis accédez à l'URL d'authentification affichée pour valider."
+if [[ "${SYSTEMD_AVAILABLE}" == "true" ]]; then
+    echo "Important : La première authentification GitHub doit être réalisée manuellement."
+    echo "Ouvrez les logs du service avec : sudo journalctl -u $SERVICE_NAME -f"
+    echo "Puis accédez à l'URL d'authentification affichée pour valider."
+fi
 echo ""
 echo "Statut du service : sudo systemctl status $SERVICE_NAME"
