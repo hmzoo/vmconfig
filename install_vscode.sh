@@ -9,6 +9,26 @@ CLI_BIN="/usr/local/bin/code"
 SERVICE_NAME="code-tunnel.service"
 TARGET_USER="${1:-${SUDO_USER:-}}"
 
+# Chargement optionnel du fichier .env
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+VSCODE_TUNNEL_NAME="$(hostname 2>/dev/null || echo 'vscode-tunnel')"
+
+if [[ -f "${SCRIPT_DIR}/.env" ]]; then
+	while IFS='=' read -r key value; do
+		[[ "$key" =~ ^#.*$ || -z "$key" ]] && continue
+		key="${key#"${key%%[![:space:]]*}"}"
+		key="${key%"${key##*[![:space:]]}"}"
+		value="${value#"${value%%[![:space:]]*}"}"
+		value="${value%"${value##*[![:space:]]}"}"
+		value="${value%\"}"
+		value="${value#\"}"
+		
+		if [[ "$key" == "VSCODE_TUNNEL_NAME" ]]; then
+			VSCODE_TUNNEL_NAME="$value"
+		fi
+	done < "${SCRIPT_DIR}/.env"
+fi
+
 if [[ -z "${TARGET_USER}" ]]; then
     echo "[ERREUR] Utilisateur cible introuvable."
     echo "Exemple: sudo ./install_vscode.sh hmj"
@@ -59,6 +79,7 @@ chmod +x "$CLI_DIR/code"
 
 # Création du service systemd pour code tunnel
 echo "[INFO] Création du service systemd $SERVICE_NAME..."
+echo "[INFO] Nom du tunnel: $VSCODE_TUNNEL_NAME"
 cat <<EOF > /etc/systemd/system/$SERVICE_NAME
 [Unit]
 Description=VS Code Remote Tunnel
@@ -69,7 +90,7 @@ Type=simple
 User=$TARGET_USER
 Group=$TARGET_USER
 WorkingDirectory=/home/$TARGET_USER
-ExecStart=$CLI_BIN tunnel --accept-server-license-terms --name %H
+ExecStart=$CLI_BIN tunnel --accept-server-license-terms --name $VSCODE_TUNNEL_NAME
 Restart=always
 RestartSec=10
 Environment=HOME=/home/$TARGET_USER
@@ -130,18 +151,26 @@ else
     if [[ "${SYSTEMD_AVAILABLE}" == "true" ]]; then
         echo "[INFO] Le code de connexion GitHub n'a pas ete detecte automatiquement."
         echo "[INFO] Lancez: sudo journalctl -u $SERVICE_NAME -f"
+        echo "[INFO]"
+        echo "[INFO] VS Code tunnel utilise l'authentification GitHub 'device flow':"
+        echo "[INFO] Tu dois scanner/ouvrir l'URL affichee dans les logs et autoriser l'acces."
+        echo "[INFO] Cela ne peut pas etre automatise pour des questions de securite."
     else
         echo "[INFO] Service systemd non disponible - configuration manuelle requise."
         echo "[INFO] Pour demarrer le tunnel VS Code, lancez:"
         echo "[INFO]   su - $TARGET_USER"
-        echo "[INFO]   $CLI_BIN tunnel --accept-server-license-terms --name \$(hostname)"
+        echo "[INFO]   $CLI_BIN tunnel --accept-server-license-terms --name $VSCODE_TUNNEL_NAME"
+        echo "[INFO]"
+        echo "[INFO] VS Code tunnel utilise l'authentification GitHub 'device flow':"
+        echo "[INFO] Tu dois scanner/ouvrir l'URL affichee et autoriser l'acces."
     fi
 fi
 
 if [[ "${SYSTEMD_AVAILABLE}" == "true" ]]; then
-    echo "Important : La première authentification GitHub doit être réalisée manuellement."
-    echo "Ouvrez les logs du service avec : sudo journalctl -u $SERVICE_NAME -f"
-    echo "Puis accédez à l'URL d'authentification affichée pour valider."
+    echo ""
+    echo "[INFO] Configuration terminee avec systemd."
+    echo "[INFO] Pour voir les logs en temps reel:"
+    echo "[INFO]   sudo journalctl -u $SERVICE_NAME -f"
 fi
 echo ""
 echo "Statut du service : sudo systemctl status $SERVICE_NAME"
