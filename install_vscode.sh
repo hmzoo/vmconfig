@@ -1,11 +1,24 @@
 #!/bin/bash
+set -euo pipefail
 
 # Variables
 CLI_URL="https://code.visualstudio.com/sha/download?build=stable&os=cli-alpine-x64"
 CLI_ARCHIVE="/tmp/vscode_cli.tar.gz"
-CLI_DIR="/opt/vscode-cli"
+CLI_DIR="/usr/local/lib/vscode-cli"
+CLI_BIN="/usr/local/bin/code"
 SERVICE_NAME="code-tunnel.service"
-USER="hmj"  # remplacer par le nom d'utilisateur du serveur
+TARGET_USER="${1:-${SUDO_USER:-}}"
+
+if [[ -z "${TARGET_USER}" ]]; then
+    echo "[ERREUR] Utilisateur cible introuvable."
+    echo "Exemple: sudo ./install_vscode.sh hmj"
+    exit 1
+fi
+
+if ! id -u "$TARGET_USER" >/dev/null 2>&1; then
+    echo "[ERREUR] Utilisateur introuvable: $TARGET_USER"
+    exit 1
+fi
 
 # Vérification des droits root
 if [ "$EUID" -ne 0 ]; then
@@ -15,14 +28,33 @@ fi
 
 # Installation CLI Code
 echo "[INFO] Téléchargement de la CLI VS Code..."
-curl -Lk "$CLI_URL" -o "$CLI_ARCHIVE"
+curl -fL --retry 3 --retry-delay 2 "$CLI_URL" -o "$CLI_ARCHIVE"
+
+if [[ ! -s "$CLI_ARCHIVE" ]]; then
+    echo "[ERREUR] Le fichier téléchargé est vide: $CLI_ARCHIVE"
+    exit 1
+fi
+
+if ! tar -tzf "$CLI_ARCHIVE" >/dev/null 2>&1; then
+    echo "[ERREUR] Le téléchargement VS Code CLI n'est pas une archive valide."
+    echo "URL testée: $CLI_URL"
+    exit 1
+fi
 
 echo "[INFO] Extraction..."
 mkdir -p "$CLI_DIR"
-tar -xf "$CLI_ARCHIVE" -C "$CLI_DIR" --strip-components=1
+rm -f "$CLI_DIR/code"
+tar -xzf "$CLI_ARCHIVE" -C "$CLI_DIR"
+
+if [[ ! -f "$CLI_DIR/code" ]]; then
+    echo "[ERREUR] Binaire VS Code CLI introuvable apres extraction: $CLI_DIR/code"
+    exit 1
+fi
+
+ln -sf "$CLI_DIR/code" "$CLI_BIN"
 
 # Définition des permissions appropriées
-chown -R "$USER:$USER" "$CLI_DIR"
+chown -R "$TARGET_USER:$TARGET_USER" "$CLI_DIR"
 chmod +x "$CLI_DIR/code"
 
 # Création du service systemd pour code tunnel
@@ -34,13 +66,13 @@ After=network.target
 
 [Service]
 Type=simple
-User=$USER
-Group=$USER
-WorkingDirectory=/home/$USER
-ExecStart=$CLI_DIR/code tunnel --accept-server-license-terms
+User=$TARGET_USER
+Group=$TARGET_USER
+WorkingDirectory=/home/$TARGET_USER
+ExecStart=$CLI_BIN tunnel --accept-server-license-terms --name %H
 Restart=always
 RestartSec=10
-Environment=HOME=/home/$USER
+Environment=HOME=/home/$TARGET_USER
 
 [Install]
 WantedBy=multi-user.target
@@ -51,10 +83,41 @@ systemctl daemon-reload
 systemctl enable "$SERVICE_NAME"
 systemctl start "$SERVICE_NAME"
 
+echo "[INFO] Recuperation des informations de connexion tunnel..."
+AUTH_LINE=""
+
+for _ in {1..10}; do
+    RECENT_LOGS="$(journalctl -u "$SERVICE_NAME" -n 80 --no-pager 2>/dev/null || true)"
+    AUTH_LINE="$(printf '%s\n' "$RECENT_LOGS" | grep -E 'https://github.com/login/device|use code [A-Z0-9-]+' | tail -n 1 || true)"
+
+    if [[ -n "$AUTH_LINE" ]]; then
+        break
+    fi
+
+    sleep 2
+done
+
 # Nettoyage
 rm -f "$CLI_ARCHIVE"
 
-echo "[INFO] Installation terminée. Le tunnel VS Code est lancé automatiquement au démarrage."
+echo "[INFO] Installation terminee. Le tunnel VS Code est lance automatiquement au demarrage."
+
+echo "[INFO] Dernieres lignes du service:"
+journalctl -u "$SERVICE_NAME" -n 20 --no-pager || true
+
+if [[ -n "$AUTH_LINE" ]]; then
+    DEVICE_CODE="$(printf '%s\n' "$AUTH_LINE" | sed -n 's/.*use code \([A-Z0-9-]\+\).*/\1/p')"
+    echo ""
+    echo "[INFO] Authentification GitHub detectee:"
+    echo "[INFO] URL  : https://github.com/login/device"
+    if [[ -n "$DEVICE_CODE" ]]; then
+        echo "[INFO] Code : $DEVICE_CODE"
+    fi
+else
+    echo ""
+    echo "[INFO] Le code de connexion GitHub n'a pas ete detecte automatiquement."
+    echo "[INFO] Lancez: sudo journalctl -u $SERVICE_NAME -f"
+fi
 
 echo "Important : La première authentification GitHub doit être réalisée manuellement."
 echo "Ouvrez les logs du service avec : sudo journalctl -u $SERVICE_NAME -f"
