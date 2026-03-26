@@ -7,8 +7,26 @@ CLI_ARCHIVE="/tmp/vscode_cli.tar.gz"
 CLI_DIR="/usr/local/lib/vscode-cli"
 CLI_BIN="/usr/local/bin/code"
 SERVICE_NAME="code-tunnel.service"
-TARGET_USER="${1:-${SUDO_USER:-}}"
 TARGET_HOME=""
+
+detect_default_user() {
+	if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+		echo "${SUDO_USER}"
+		return
+	fi
+	local login_user=""
+	login_user="$(logname 2>/dev/null || true)"
+	if [[ -n "${login_user}" && "${login_user}" != "root" ]]; then
+		echo "${login_user}"
+		return
+	fi
+	awk -F: '$3 >= 1000 && $1 != "nobody" { print $1; exit }' /etc/passwd
+}
+
+TARGET_USER="${1:-}"
+if [[ -z "${TARGET_USER}" ]]; then
+	TARGET_USER="$(detect_default_user)"
+fi
 VSCODE_SETTINGS_DIR=""
 VSCODE_SETTINGS_FILE=""
 
@@ -34,7 +52,7 @@ fi
 
 if [[ -z "${TARGET_USER}" ]]; then
     echo "[ERREUR] Utilisateur cible introuvable."
-    echo "Exemple: sudo ./install_vscode.sh hmj"
+    echo "Usage: sudo ./install_vscode.sh [username]"
     exit 1
 fi
 

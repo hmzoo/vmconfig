@@ -2,9 +2,26 @@
 set -euo pipefail
 
 # Usage:
-#   ./options/install_docker.sh [username]
+#   sudo ./options/install_docker.sh [username]
 
-TARGET_USER="${1:-${SUDO_USER:-}}"
+detect_default_user() {
+	if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+		echo "${SUDO_USER}"
+		return
+	fi
+	local login_user=""
+	login_user="$(logname 2>/dev/null || true)"
+	if [[ -n "${login_user}" && "${login_user}" != "root" ]]; then
+		echo "${login_user}"
+		return
+	fi
+	awk -F: '$3 >= 1000 && $1 != "nobody" { print $1; exit }' /etc/passwd
+}
+
+TARGET_USER="${1:-}"
+if [[ -z "${TARGET_USER}" ]]; then
+	TARGET_USER="$(detect_default_user)"
+fi
 
 if [[ "${EUID}" -ne 0 ]]; then
 	SUDO="sudo"
@@ -51,7 +68,7 @@ resolve_docker_codename() {
 
 if [[ -z "${TARGET_USER}" ]]; then
 	echo "[docker][ERREUR] Impossible de determiner l'utilisateur cible."
-	echo "Exemple: ./options/install_docker.sh hmj"
+	echo "Usage: sudo ./options/install_docker.sh [username]"
 	exit 1
 fi
 
