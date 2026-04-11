@@ -83,6 +83,7 @@ run_step() {
 
 run_step "Base system" "bash \"${ROOT_DIR}/install_base.sh\""
 run_step "GitHub CLI" "bash \"${ROOT_DIR}/install_gh.sh\""
+run_step "Hugging Face CLI" "bash \"${ROOT_DIR}/install_hf.sh\""
 run_step "VS Code tunnel" "bash \"${ROOT_DIR}/install_vscode.sh\" \"${TARGET_USER}\""
 
 if [[ "${WITH_DOCKER}" == "true" ]]; then
