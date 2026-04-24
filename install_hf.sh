@@ -50,7 +50,29 @@ if [[ -n "${HF_HOME}" ]]; then
 fi
 
 log "Installation du CLI Hugging Face"
-curl -LsSf https://hf.co/cli/install.sh | bash
+
+# Si un ancien venv existe mais sans pip, l'installateur officiel le reutilise
+# et echoue. On le repare de maniere preventive.
+HF_CLI_VENV_DIR="${HOME}/.hf-cli/venv"
+HF_CLI_VENV_PYTHON="${HF_CLI_VENV_DIR}/bin/python"
+
+if [[ -x "${HF_CLI_VENV_PYTHON}" ]]; then
+	if ! "${HF_CLI_VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
+		log "Venv Hugging Face detecte sans pip, recreation du venv"
+		rm -rf "${HF_CLI_VENV_DIR}"
+		if command -v python3 >/dev/null 2>&1; then
+			python3 -m venv "${HF_CLI_VENV_DIR}"
+			if ! "${HF_CLI_VENV_PYTHON}" -m pip --version >/dev/null 2>&1; then
+				"${HF_CLI_VENV_PYTHON}" -m ensurepip --upgrade >/dev/null 2>&1 || true
+			fi
+		else
+			log "WARN : python3 introuvable, impossible de reparer le venv automatiquement"
+		fi
+	fi
+fi
+
+# Transmettre les options du script wrapper vers l'installateur officiel.
+curl -LsSf https://hf.co/cli/install.sh | bash -s -- "$@"
 
 # S'assurer que ~/.local/bin est dans le PATH pour la session courante
 if [[ ":${PATH}:" != *":${HOME}/.local/bin:"* ]]; then
