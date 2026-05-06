@@ -53,7 +53,13 @@ log "Installation du CLI Hugging Face"
 
 # Si un ancien venv existe mais sans pip, l'installateur officiel le reutilise
 # et echoue. On le repare de maniere preventive.
-HF_CLI_VENV_DIR="${HOME}/.hf-cli/venv"
+# L'installateur officiel place le venv dans <install_dir>/venv.
+# <install_dir> vaut HF_HOME/cli si HF_HOME est defini, sinon ~/.hf-cli.
+if [[ -n "${HF_HOME:-}" ]]; then
+	HF_CLI_VENV_DIR="${HF_HOME}/cli/venv"
+else
+	HF_CLI_VENV_DIR="${HOME}/.hf-cli/venv"
+fi
 HF_CLI_VENV_PYTHON="${HF_CLI_VENV_DIR}/bin/python"
 
 if [[ -x "${HF_CLI_VENV_PYTHON}" ]]; then
